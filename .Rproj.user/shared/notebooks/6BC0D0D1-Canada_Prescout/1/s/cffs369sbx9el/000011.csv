@@ -1,0 +1,25 @@
+"0","olympic_data <- read_csv('olympic_womens_dataset.csv')"
+"1","[1mRows: [22m[34m24002[39m [1mColumns: [22m[34m21[39m
+"
+"1","[36m──[39m [1mColumn specification[22m [36m──────────────────────────────────────────────[39m
+[1mDelimiter:[22m "",""
+[31mchr[39m  (8): Home Team, Away Team, Team, Player, Event, Detail 1, Det...
+[32mdbl[39m  (9): Period, Home Team Skaters, Away Team Skaters, Home Team ...
+[33mlgl[39m  (2): Detail 3, Detail 4
+[34mdate[39m (1): game_date
+[34mtime[39m (1): Clock
+"
+"1","
+[36mℹ[39m Use `spec()` to retrieve the full column specification for this data.
+[36mℹ[39m Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","# Filter out collegiate games"
+"0","olympic_data_only <-"
+"0","  olympic_data %>%"
+"0","  filter(str_detect(`Home Team`, ""Olympic"")) %>%"
+"0","  mutate(NextTeam = dplyr::lead(Team), NextEvent = dplyr::lead(Event))"
+"0",""
+"0","canada_data <-"
+"0","  olympic_data_only %>%"
+"0","  filter(`Home Team` == ""Olympic (Women) - Canada"" | `Away Team` == ""Olympic (Women) - Canada"") %>%"
+"0","  mutate(is_Canada = ifelse(Team == ""Olympic (Women) - Canada"", ""Canada"", ""Opponent""))"

@@ -1,0 +1,284 @@
+---
+title: "Postgame"
+author: "Claire Dudley"
+date: "2024-11-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+```
+
+```{r, include = FALSE}
+olympic_data <- read_csv('olympic_womens_dataset.csv')
+
+postgame_data <-
+  olympic_data %>%
+  filter(game_date == "2019-02-17")
+```
+
+```{r}
+xmin <- 154
+xmax <- 184
+ymin <- 35.5
+ymax <- 49.5
+
+postgame_data <-
+  postgame_data %>%
+  mutate(IsSlotShot = ifelse(
+    `X Coordinate` >= xmin & `X Coordinate` <= xmax &
+      `Y Coordinate` >= ymin & `Y Coordinate` <= ymax, 
+    1,
+    0
+  ),
+  IsSlotPass = ifelse(
+    `X Coordinate 2` >= xmin & `X Coordinate` <= xmax &
+      `Y Coordinate 2` >= ymin & `Y Coordinate` <= ymax, 
+    1,
+    0
+  )
+  )
+```
+
+General Statistics
+```{r}
+postgame_data %>%
+  filter(`Home Team Skaters` == 5 & `Away Team Skaters` == 5) %>%
+  group_by(Team) %>%
+  summarise(
+    Goals = round(sum(Event == "Goal"), 2),
+    Shots = round(sum(Event == "Shot"), 2),
+    ShotsonNet = round(sum(Event == "Shot" & `Detail 2` == "On Net"), 2),
+    PercentSlotShots = round((sum(IsSlotShot)) / Shots, 2),
+    SlotPasses = round(sum(IsSlotPass, na.rm = TRUE), 2),
+    PenaltiesTaken = round(sum(Event == "Penalty Taken"), 2),
+    PuckRecoveries = round(sum(Event == "Puck Recovery"), 2),
+    Takeaways = round(sum(Event == "Takeaway"), 2),
+    FaceoffWins = round(sum(Event == "Faceoff Win"), 2),
+    ZoneEntries = round(sum(Event == "Zone Entry"), 2),
+    PassingRate = round(sum(Event == "Play") / (sum(Event == "Play") + sum(Event == "Incomplete Play")), 2)
+  ) %>%
+  pivot_longer(-Team, names_to = "Metric", values_to = "Value") %>%
+  pivot_wider(names_from = Team, values_from = Value) %>%
+  kable()
+```
+
+Where did both teams generate offense?
+```{r}
+postgame_data <-
+  postgame_data %>%
+  mutate(NextTeam = dplyr::lead(Team), NextEvent = dplyr::lead(Event))
+
+# Canada
+canada_offense <-
+  postgame_data %>%
+  filter(NextTeam == "Olympic (Women) - Canada" & NextEvent %in% c("Shot", "Goal"))
+
+canada_offense %>%
+  group_by(Event) %>%
+  summarise(Count = n()) %>%
+  mutate(Percent = ((Count / sum(Count)) * 100)) %>%
+  arrange(desc(Percent)) %>%
+  kable()
+
+# U.S.
+us_offense <-
+  postgame_data %>%
+  filter(NextTeam == "Olympic (Women) - United States" & NextEvent %in% c("Shot", "Goal"))
+
+us_offense %>%
+  group_by(Event) %>%
+  summarise(Count = n()) %>%
+  mutate(Percent = ((Count / sum(Count)) * 100)) %>%
+  arrange(desc(Percent)) %>%
+  kable()
+```
+
+# Powerplay and Penalty Kill
+
+```{r}
+postgame_data <- 
+  postgame_data %>%
+  mutate(
+    PPGF_home = ifelse((Event == "Goal" & `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters` ), TRUE, FALSE) ,
+    PPGF_away = ifelse((Event == "Goal" & `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters` ), TRUE, FALSE),
+    PPshots_home = ifelse((Event == "Shot" & `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters` ), TRUE, FALSE),
+    PPshots_away =  ifelse((Event == "Shot" & `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters` ), TRUE, FALSE),
+    penalties_home = ifelse(Event == "Penalty Taken" & `Home Team` == Team, TRUE, FALSE),
+    penalties_away = ifelse(Event == "Penalty Taken" & `Away Team` == Team, TRUE, FALSE),
+    PP_recoveries_home = ifelse(`X Coordinate` < 50 & Event == "Puck Recovery" &  `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters`, TRUE, FALSE),
+    PP_recoveries_away = ifelse(`X Coordinate` < 50 & Event == "Puck Recovery" &  `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters`, TRUE, FALSE)
+  )
+
+game_data_us_can <- 
+  postgame_data %>%
+  group_by(game_date, `Home Team`, `Away Team`) %>%
+  summarise(
+    HomeGoals = sum(Event == "Goal" & `Home Team` == Team),
+    AwayGoals = sum(Event == "Goal" & `Away Team` == Team),
+    HomePP_goals = sum(PPGF_home),
+    AwayPP_goals = sum(PPGF_away),
+    HomePP_shots = sum(PPshots_home),
+    AwayPP_shots = sum(PPshots_away),
+    Home_penalties = sum(penalties_home),
+    Away_penalties = sum(penalties_away),
+    Home_recoveries = sum(PP_recoveries_home),
+    Away_recoveries = sum(PP_recoveries_away),
+    .groups = "drop")
+
+game_data_us_can <- game_data_us_can %>%
+  mutate(
+    Home_opposing_penalties = Away_penalties,
+    Away_opposing_penalties = Home_penalties
+  )
+
+# longer
+long_data_us_can <- game_data_us_can %>%
+  pivot_longer(
+    cols = c(HomeGoals, AwayGoals, HomePP_goals, AwayPP_goals, HomePP_shots, AwayPP_shots,
+             Home_recoveries, Away_recoveries,
+             Home_opposing_penalties, Away_opposing_penalties),
+    names_to = c("Type", ".value"),
+    names_pattern = "(Home|Away)(.*)"
+  ) %>% ungroup()
+
+long_data_us_can <- long_data_us_can %>%
+  mutate(
+    Team = ifelse(Type == "Home", `Home Team`, `Away Team`),
+    Opposing_penalties = ifelse(Type == "Home", Away_penalties, Home_penalties)  # Map opposing penalties explicitly
+  ) %>%
+  select(game_date, Team, Goals, PP_goals, Opposing_penalties, PP_shots, `_recoveries`) %>%
+  mutate(Canada = ifelse(Team == "Olympic (Women) - Canada", "Canada", "Opponent"))
+
+
+# Calculate power play success percentage
+pp_data <- long_data_us_can %>%
+  mutate(
+    PP_success_percentage = ifelse(Opposing_penalties > 0, (PP_goals / Opposing_penalties) * 100, 0)
+  ) 
+
+pp_data2 <-
+  pp_data %>%
+  group_by(Team) %>%
+  summarise(
+    Goals = sum(Goals),
+    PP_goals = sum(PP_goals),
+    Opportunities = sum(Opposing_penalties),
+    PP_shots = sum(PP_shots),
+    recoveries = sum(`_recoveries`)
+    
+    
+  )
+
+
+  pp_data2 %>%
+  mutate(Success_Rate = PP_goals / Opportunities,
+         Shots_per_opportunity = PP_shots / Opportunities,
+         Recoveries_per_opportunity = recoveries / Opportunities) %>%
+  arrange(desc(Success_Rate)) %>%
+    dplyr::select(-PP_shots, -recoveries) %>%
+  kable()
+```
+
+# Top Players
+```{r}
+can_players <- postgame_data %>%
+  filter(Team == "Olympic (Women) - Canada") %>%
+  group_by(Player) %>%
+  summarize(
+    Total_Shots = sum(Event == "Shot", na.rm = TRUE),
+    Goals = sum(Event == "Goal", na.rm = TRUE),
+    Assists = sum(Player == "Player 2" & Event %in% c("Goal", "Play"), na.rm = TRUE), # Count assists
+    Total_Points = Goals + Assists,
+    Passes = sum(Event == "Play", na.rm = TRUE),
+    Incomplete_Passes = sum(Event == "Incomplete Play", na.rm = TRUE),
+    Takeaways = sum(Event == "Takeaway", na.rm = TRUE),
+    Puck_Recoveries = sum(Event == "Puck Recovery", na.rm = TRUE),
+    Dump_Ins = sum(Event == "Zone Entry" & `Detail 1` == "Dumped"),
+    Dump_Outs = sum(Event == "Dump Out", na.rm = TRUE),
+    Zone_Entries = sum(Event == "Zone Entry" & `Detail 1` == "Carried"),
+    Faceoff_Wins = sum(Event == "Faceoff Win", na.rm = TRUE),
+    Penalties_Taken = sum(Event == "Penalty Taken", na.rm = TRUE),
+    Shot_Traffic = sum(Event == "Shot" & "Detail 3" == "true", na.rm = TRUE),
+    Shot_OneTimers = sum(Event == "Shot" & "Detail 4" == "true", na.rm = TRUE),
+  ) %>%
+  ungroup()
+
+can_players %>%
+  mutate(
+    Shooting_Accuracy = Goals /Total_Shots,
+    Passing_Accuracy = Passes / (Passes + Incomplete_Passes)
+  ) %>%
+    dplyr::select(Player, Goals, Passes, Puck_Recoveries, Zone_Entries, Passing_Accuracy, Shooting_Accuracy) %>%
+  arrange(desc(Goals), desc(Passes), desc(Passing_Accuracy), desc(Puck_Recoveries), desc(Zone_Entries), 
+           desc(Shooting_Accuracy)) %>%
+    head(5) %>% 
+  kable()
+
+us_players <- postgame_data %>%
+  filter(Team == "Olympic (Women) - United States") %>%
+  group_by(Player) %>%
+  summarize(
+    Total_Shots = sum(Event == "Shot", na.rm = TRUE),
+    Goals = sum(Event == "Goal", na.rm = TRUE),
+    Assists = sum(Player == "Player 2" & Event %in% c("Goal", "Play"), na.rm = TRUE), # Count assists
+    Total_Points = Goals + Assists,
+    Passes = sum(Event == "Play", na.rm = TRUE),
+    Incomplete_Passes = sum(Event == "Incomplete Play", na.rm = TRUE),
+    Takeaways = sum(Event == "Takeaway", na.rm = TRUE),
+    Puck_Recoveries = sum(Event == "Puck Recovery", na.rm = TRUE),
+    Dump_Ins = sum(Event == "Zone Entry" & `Detail 1` == "Dumped"),
+    Dump_Outs = sum(Event == "Dump Out", na.rm = TRUE),
+    Zone_Entries = sum(Event == "Zone Entry" & `Detail 1` == "Carried"),
+    Faceoff_Wins = sum(Event == "Faceoff Win", na.rm = TRUE),
+    Penalties_Taken = sum(Event == "Penalty Taken", na.rm = TRUE),
+    Shot_Traffic = sum(Event == "Shot" & "Detail 3" == "true", na.rm = TRUE),
+    Shot_OneTimers = sum(Event == "Shot" & "Detail 4" == "true", na.rm = TRUE),
+  ) %>%
+  ungroup()
+
+
+us_players %>%
+  mutate(
+    Shooting_Accuracy = Goals /Total_Shots,
+    Passing_Accuracy = Passes / (Passes + Incomplete_Passes)
+  ) %>%
+    dplyr::select(Player, Goals, Passes, Puck_Recoveries, Zone_Entries, Passing_Accuracy, Shooting_Accuracy) %>%
+  arrange(desc(Goals), desc(Passes), desc(Passing_Accuracy), desc(Puck_Recoveries), desc(Zone_Entries), 
+           desc(Shooting_Accuracy)) %>%
+    head(5) %>%
+  kable()
+```
+
+# Goaltending
+
+```{r}
+us_goaltending <-
+  postgame_data %>%
+  filter(Team == "Olympic (Women) - Canada" & Event %in% c("Shot", "Goal")) %>%
+  summarise(
+    ShotsAgainst = sum(Event == "Shot" & `Detail 2` == "On Net") + sum(Event == "Goal"),
+    SavePercentage = sum(Event == "Shot" & `Detail 2` == "On Net") / ShotsAgainst
+  )
+
+canada_goaltending <-
+  postgame_data %>%
+  filter(Team == "Olympic (Women) - United States" & Event %in% c("Shot", "Goal")) %>%
+  summarise(
+    ShotsAgainst = sum(Event == "Shot" & `Detail 2` == "On Net") + sum(Event == "Goal"),
+    SavePercentage = sum(Event == "Shot" & `Detail 2` == "On Net") / ShotsAgainst
+  )
+```
+
+
+
+
+
+

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<style>body{background-color:white;}</style>
+<script src="lib/jquery-3.6.0/jquery-3.6.0.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="lib/bootstrap-3.3.5/css/cosmo.min.css" rel="stylesheet" />
+<script src="lib/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="lib/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="lib/bootstrap-3.3.5/shim/respond.min.js"></script>
+<style>h1 {font-size: 34px;}
+       h1.title {font-size: 38px;}
+       h2 {font-size: 30px;}
+       h3 {font-size: 24px;}
+       h4 {font-size: 18px;}
+       h5 {font-size: 16px;}
+       h6 {font-size: 12px;}
+       code {color: inherit; background-color: rgba(0, 0, 0, 0.04);}
+       pre:not([class]) { background-color: white }</style>
+<script src="lib/kePrint-0.0.1/kePrint.js"></script>
+<link href="lib/lightable-0.0.1/lightable.css" rel="stylesheet" />
+
+</head>
+<body>
+<table class="table" style="font-size: 7px; margin-left: auto; margin-right: auto;">
+<caption style="font-size: initial !important;">Top 10 Players by Goals and Other Metrics</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Player </th>
+   <th style="text-align:left;"> Team </th>
+   <th style="text-align:right;"> Goals </th>
+   <th style="text-align:right;"> Passes </th>
+   <th style="text-align:right;"> Puck_Recoveries </th>
+   <th style="text-align:right;"> Zone_Entries </th>
+   <th style="text-align:right;"> Passing_Accuracy </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Marie-Philip Poulin </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 3 </td>
+   <td style="text-align:right;"> 156 </td>
+   <td style="text-align:right;"> 83 </td>
+   <td style="text-align:right;"> 23 </td>
+   <td style="text-align:right;"> 0.8000000 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Melodie Daoust </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 3 </td>
+   <td style="text-align:right;"> 108 </td>
+   <td style="text-align:right;"> 67 </td>
+   <td style="text-align:right;"> 16 </td>
+   <td style="text-align:right;"> 0.7605634 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Rebecca Johnston </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 3 </td>
+   <td style="text-align:right;"> 102 </td>
+   <td style="text-align:right;"> 92 </td>
+   <td style="text-align:right;"> 32 </td>
+   <td style="text-align:right;"> 0.6800000 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Meghan Agosta </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 2 </td>
+   <td style="text-align:right;"> 82 </td>
+   <td style="text-align:right;"> 85 </td>
+   <td style="text-align:right;"> 34 </td>
+   <td style="text-align:right;"> 0.6833333 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Haley Irwin </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 2 </td>
+   <td style="text-align:right;"> 51 </td>
+   <td style="text-align:right;"> 41 </td>
+   <td style="text-align:right;"> 2 </td>
+   <td style="text-align:right;"> 0.7391304 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Jennifer Wakefield </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 2 </td>
+   <td style="text-align:right;"> 32 </td>
+   <td style="text-align:right;"> 41 </td>
+   <td style="text-align:right;"> 14 </td>
+   <td style="text-align:right;"> 0.6153846 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Kendall Coyne Schofield </td>
+   <td style="text-align:left;"> Olympic (Women) - United States </td>
+   <td style="text-align:right;"> 1 </td>
+   <td style="text-align:right;"> 57 </td>
+   <td style="text-align:right;"> 46 </td>
+   <td style="text-align:right;"> 23 </td>
+   <td style="text-align:right;"> 0.7402597 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Hilary Knight </td>
+   <td style="text-align:left;"> Olympic (Women) - United States </td>
+   <td style="text-align:right;"> 1 </td>
+   <td style="text-align:right;"> 46 </td>
+   <td style="text-align:right;"> 24 </td>
+   <td style="text-align:right;"> 11 </td>
+   <td style="text-align:right;"> 0.7796610 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Emily Clark </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 1 </td>
+   <td style="text-align:right;"> 43 </td>
+   <td style="text-align:right;"> 58 </td>
+   <td style="text-align:right;"> 10 </td>
+   <td style="text-align:right;"> 0.6231884 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Jillian Saulnier </td>
+   <td style="text-align:left;"> Olympic (Women) - Canada </td>
+   <td style="text-align:right;"> 1 </td>
+   <td style="text-align:right;"> 43 </td>
+   <td style="text-align:right;"> 33 </td>
+   <td style="text-align:right;"> 5 </td>
+   <td style="text-align:right;"> 0.7288136 </td>
+  </tr>
+</tbody>
+</table> <script type="text/x-mathjax-config">MathJax.Hub.Config({tex2jax: {inlineMath: [["$","$"]]}})</script><script async src="https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+</body>
+</html>

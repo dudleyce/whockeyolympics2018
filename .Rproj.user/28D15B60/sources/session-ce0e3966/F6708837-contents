@@ -1,0 +1,503 @@
+---
+title: "Florida Data Project"
+author: "Claire Dudley"
+date: "2024-03-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(BradleyTerry2)
+library(brms)
+library(zoo)
+library(nnet)
+library(caret)
+```
+
+## Overview
+
+  In my model build to estimate team strengths, I started by calculating Elo ratings for teams based on the outcomes of their games in the past season and a half. Using elo ratings for both teams in a game, I tried both a logistic regression model (2 levels: win / loss whether regulation or not) and multinomial logistic regression model (3 levels: win, shootout/ot loss, reg loss). The multinomial logistic regression model had a predictive accuracy of 0.5825 and the logistic regression model had a predictive accuracy of 0.63054. I ended up using my logistic regression model to answer the questions related to team strength. I used a downloaded dataset that included the rest of the season schedule to predict the results of for the rest of the season.
+  
+
+```{r}
+nhl_scores <- read.csv('nhl_scores.csv', header = FALSE)
+```
+
+renaming columns
+```{r}
+colnames(nhl_scores) <- c("Season", "Date", "HomeTeam", "Score", "Ignore1", "Ignore2",
+                          "Outside_location")
+
+nhl_scores <-
+  nhl_scores %>%
+  dplyr::select(-Ignore1, -Ignore2)
+```
+
+# Cleaning
+
+date
+```{r}
+Sys.setlocale("LC_TIME", "C")
+nhl_scores$Date <- mdy(nhl_scores$Date)
+```
+
+hometeam
+```{r}
+nhl_scores <- nhl_scores %>%
+  mutate(HomeTeam = str_replace(HomeTeam, "^\\s*at\\s+", ""))
+
+```
+
+mapping team names
+```{r}
+team_names <-
+  c(Ana = "Anaheim",
+    Ari = "Arizona",
+    Bos = "Boston",
+    Buf = "Buffalo",
+    Car = "Carolina",
+    Cbs = "Columbus",
+    Cgy = "Calgary",
+    Chi = "Chicago",
+    Col = "Colorado",
+    Dal = "Dallas",
+    Det = "Detroit",
+    Edm = "Edmonton",
+    Fla = "Florida",
+    LA = "Los Angeles",
+    Min = "Minnesota",
+    Mtl = "Montreal",
+    NJ = "New Jersey",
+    Nsh = "Nashville",
+    NYR = "NY Rangers",
+    NYI = "NY Islanders",
+    Ott = "Ottawa",
+    Phi = "Philadelphia",
+    Pit = "Pittsburgh",
+    Sea = "Seattle",
+    SJ = "San Jose",
+    StL = "St Louis",
+    TB = "Tampa Bay",
+    Tor = "Toronto",
+    Van = "Vancouver",
+    VGK = "Vegas",
+    Wpg = "Winnipeg",
+    Wsh = "Washington"
+    
+    )
+```
+
+splitting up score
+```{r}
+nhl_scores <- nhl_scores %>%
+  mutate(ScoreParts = str_split(Score, ", ", n = 2),
+         Team1Info = map_chr(ScoreParts, 1),
+         Team2Info = map_chr(ScoreParts, 2),
+         Team1Score = as.integer(str_extract(Team1Info, "\\d+$")),
+         Team2Score = as.integer(str_extract(Team2Info, "\\d+")),
+         Team1Name = str_replace(Team1Info, "\\s\\d+$", ""),
+         Team2Name = str_replace(Team2Info, "\\s\\d+.*$", "")) %>%
+  select(-ScoreParts, -Team1Info, -Team2Info)
+```
+
+overtime/shootout
+```{r}
+nhl_scores <- nhl_scores %>%
+  mutate(GameOutcome = case_when(
+    str_detect(Score, "\\(OT\\)") ~ "Overtime",
+    str_detect(Score, "\\(SO\\)") ~ "Shootout",
+    TRUE ~ "Regulation"
+  ))
+```
+
+mapping names
+```{r}
+nhl_scores <- nhl_scores %>%
+  mutate(HomeTeamFullName = team_names[HomeTeam],
+         IsHomeTeam1 = HomeTeamFullName == Team1Name,
+         HomeScore = if_else(IsHomeTeam1, Team1Score, Team2Score),
+         AwayScore = if_else(IsHomeTeam1, Team2Score, Team1Score),
+         AwayTeamFullName = if_else(IsHomeTeam1, Team2Name, Team1Name))
+```
+
+final set
+```{r}
+clean_scores <-
+  nhl_scores %>%
+  dplyr::select(Season, Date, HomeTeamFullName, HomeScore, AwayTeamFullName, AwayScore, GameOutcome)
+```
+
+# Modeling
+
+## Elo Ratings
+
+```{r}
+nhl_scores <- nhl_scores %>% arrange(Date)
+
+# initial team ratings
+teams <- unique(c(nhl_scores$HomeTeamFullName, nhl_scores$AwayTeamFullName))
+team_ratings <- data.frame(Team = teams, Elo = rep(1500, length(teams)))
+
+# update elo function
+update_elo <- function(home_team, away_team, home_score, away_score, date, team_ratings, k = 32, home_advantage = 100) {
+  # current ratings
+  home_rating <- team_ratings$Elo[team_ratings$Team == home_team] + home_advantage
+  away_rating <- team_ratings$Elo[team_ratings$Team == away_team]
+  
+  # expected scores w/ home adjustment
+  expected_home <- 1 / (1 + 10^((away_rating - home_rating) / 400))
+  expected_away <- 1 - expected_home
+  
+  #  actual scores
+  actual_home <- ifelse(home_score > away_score, 1, ifelse(home_score == away_score, 0.5, 0))
+  actual_away <- 1 - actual_home
+  
+  # adjusting K based on margin of victory
+  margin_of_victory_multiplier <- log(abs(home_score - away_score) + 1) 
+  k_adjusted <- k * margin_of_victory_multiplier
+  
+  # ratings update
+  team_ratings$Elo[team_ratings$Team == home_team] <- home_rating + k_adjusted * (actual_home - expected_home) - home_advantage
+  team_ratings$Elo[team_ratings$Team == away_team] <- away_rating + k_adjusted * (actual_away - expected_away)
+  
+  
+  
+  return(team_ratings)
+}
+
+# Loop through games, updating Elo ratings
+for(i in 1:nrow(nhl_scores)) {
+  row <- nhl_scores[i, ]
+  team_ratings <- update_elo(row$HomeTeamFullName, row$AwayTeamFullName, row$HomeScore, row$AwayScore, row$Date, team_ratings)
+}
+
+# After updating through all games, check the final ratings
+team_ratings <- team_ratings %>% arrange(desc(Elo))
+print(team_ratings)
+
+```
+
+## Preparing to use in a model
+
+```{r}
+clean_scores_long <- clean_scores %>%
+  mutate(IsHomeGame = 1, Season = Season) %>%
+  rename(TeamFullName = HomeTeamFullName, TeamScore = HomeScore, OpponentFullName = AwayTeamFullName, OpponentScore = AwayScore) %>%
+  bind_rows(
+    clean_scores %>%
+      mutate(IsHomeGame = 0, Season = Season) %>%
+      rename(TeamFullName = AwayTeamFullName, TeamScore = AwayScore, OpponentFullName = HomeTeamFullName, OpponentScore = HomeScore)
+  ) %>%
+  arrange(Date, IsHomeGame)
+```
+
+```{r}
+clean_scores_long2 <- merge(clean_scores_long, team_ratings, by.x = "TeamFullName", by.y = "Team", all.x = TRUE)
+
+names(clean_scores_long2)[names(clean_scores_long2) == "Elo"] <- "TeamElo"
+
+clean_scores_long3 <- merge(clean_scores_long2, team_ratings, by.x = "OpponentFullName", by.y = "Team", all.x = TRUE)
+
+names(clean_scores_long3)[names(clean_scores_long3) == "Elo"] <- "OpponentElo"
+```
+
+# Recent win variable
+
+```{r}
+clean_scores_long3 <-
+  clean_scores_long3 %>%
+  arrange(TeamFullName, Date) %>%
+  group_by(TeamFullName) %>%
+  mutate(Date = as.Date(Date),
+    Recent = if_else(Date > max(Date) %m-% months(2), 1, 0),
+    Points = case_when(
+      (TeamScore > OpponentScore) ~ 2,
+      (TeamScore < OpponentScore) & (GameOutcome %in% c("Shootout", "Overtime")) ~ 1,
+      TRUE ~ 0
+    ),
+    GamesPlayed = if_else(Recent == 1, 1, 0))
+  
+recent_form <- clean_scores_long3 %>%
+  filter(Recent == 1) %>%
+  group_by(TeamFullName) %>%
+  summarise(TotalRecentGames = sum(GamesPlayed, na.rm = TRUE),
+    RecentPoints = sum(Points, na.rm = TRUE)) %>%
+  ungroup()
+
+recent_form <-
+  recent_form %>%
+  mutate(RecentPerc = RecentPoints / (TotalRecentGames * 2))
+```
+
+```{r}
+clean_scores_long4 <-
+  left_join(clean_scores_long3, recent_form, by = "TeamFullName")
+```
+
+
+```{r}
+clean_scores_long4 <- 
+  clean_scores_long4 %>%
+  arrange(TeamFullName, Date) %>%
+  group_by(TeamFullName) %>%
+  mutate(RollingAvgPoints = rollapply(Points, 10, mean, partial = TRUE, align = 'right', fill = NA)) %>%
+  ungroup()
+
+```
+
+
+
+## Answering Questions
+
+
+reading in schedule for rest of season:
+
+```{r}
+second_half <-
+  read_csv('nhl-202324-asplayed.csv')
+```
+
+```{r}
+second_half_select <- 
+  second_half %>%
+  dplyr::select(Date, Home, Visitor)
+```
+
+```{r}
+second_half_select <-
+  second_half_select %>%
+  filter(Date > '2024-01-20')
+```
+
+```{r}
+team_names_2 <-
+  c('Anaheim Ducks' = "Anaheim",
+    'Arizona Coyotes' = "Arizona",
+    'Boston Bruins' = "Boston",
+    'Buffalo Sabres' = "Buffalo",
+    'Carolina Hurricanes' = "Carolina",
+    'Columbus Blue Jackets' = "Columbus",
+    'Calgary Flames' = "Calgary",
+    'Chicago Blackhawks' = "Chicago",
+    'Colorado Avalanche' = "Colorado",
+    'Dallas Stars' = "Dallas",
+    'Detroit Red Wings' = "Detroit",
+    'Edmonton Oilers' = "Edmonton",
+    'Florida Panthers' = "Florida",
+    'Los Angeles Kings' = "Los Angeles",
+    'Minnesota Wild' = "Minnesota",
+    'Montreal Canadiens' = "Montreal",
+    'New Jersey Devils' = "New Jersey",
+    'Nashville Predators' = "Nashville",
+    'New York Rangers' = "NY Rangers",
+    'New York Islanders' = "NY Islanders",
+    'Ottawa Senators' = "Ottawa",
+    'Philadelphia Flyers' = "Philadelphia",
+    'Pittsburgh Penguins' = "Pittsburgh",
+    'Seattle Kraken' = "Seattle",
+    'San Jose Sharks' = "San Jose",
+    'St. Louis Blues' = "St Louis",
+    'Tampa Bay Lightning' = "Tampa Bay",
+    'Toronto Maple Leafs' = "Toronto",
+    "Vancouver Canucks" = "Vancouver",
+    'Vegas Golden Knights' = "Vegas",
+    'Winnipeg Jets' = "Winnipeg",
+    'Washington Capitals' = "Washington"
+    
+    )
+```
+
+```{r}
+second_half_select2 <-
+  second_half_select %>%
+  mutate(Home = team_names_2[Home], 
+         Visitor = team_names_2[Visitor])
+```
+
+
+```{r}
+filtered_form_home <- 
+  clean_scores_long4 %>%
+  dplyr::select(TeamFullName, TeamElo, RecentPerc) %>%
+  distinct()
+
+second_half_select3 <-
+  second_half_select2 %>%
+  rename(TeamFullName = Home,
+         OpponentFullName = Visitor
+         )
+
+test_set_half <- left_join(
+  second_half_select3, filtered_form_home, by = "TeamFullName"
+)
+
+filtered_form_home <-
+  filtered_form_home %>%
+  rename(OpponentElo = TeamElo, 
+         OpponentFullName = TeamFullName,
+         OpponentRecentPerc = RecentPerc)
+
+test_set <-
+  left_join(test_set_half, filtered_form_home, by = "OpponentFullName")
+
+test_set <-
+  test_set %>%
+  dplyr::select(-OpponentRecentPerc)
+
+```
+
+# Modeling
+
+```{r}
+clean_scores_long4 <-
+  clean_scores_long4 %>%
+  mutate(Points = as.factor(Points))
+
+predict_data <-
+  test_set %>%
+  dplyr::select(Date, TeamFullName, OpponentFullName, TeamElo, OpponentElo, RecentPerc)
+```
+
+pivot longer
+```{r}
+team_view <- predict_data %>%
+  rename(TeamElo = TeamElo,
+         OpponentElo = OpponentElo,
+         RecentPerc = RecentPerc)
+
+# Inverted dataset where each team's opponent is now "TeamFullName"
+opponent_view <- predict_data %>%
+  rename(TeamFullName = OpponentFullName,
+         OpponentFullName = TeamFullName,
+         TeamElo = OpponentElo,
+         OpponentElo = TeamElo,
+         RecentPerc = RecentPerc)  # Assuming you have a way to get the opponent's RecentPerc
+
+# Combine both views
+long_predict_data <- bind_rows(team_view, opponent_view)
+```
+
+reg
+
+```{r}
+clean_scores_long4 <-
+  clean_scores_long4 %>%
+  mutate(Points2 = if_else(Points == 2, 1, 0))
+
+clean_scores_long4$Points2 <- as.factor(clean_scores_long4$Points2)
+```
+
+## cross validation
+
+```{r}
+sorted_data <- clean_scores_long4 %>% arrange(Date)
+split_index <- floor(0.8 * nrow(sorted_data))
+training_data <- sorted_data[1:split_index, ]
+testing_data <- sorted_data[(split_index + 1):nrow(sorted_data), ]
+```
+
+```{r}
+logistic_model <- glm(Points2 ~ TeamElo + OpponentElo, 
+                      family = binomial(link = "logit"), 
+                      data = training_data)
+multi_model <- multinom(Points ~ TeamElo + OpponentElo, data = training_data)
+
+predicted_probs <- predict(logistic_model, newdata = testing_data, type = "response")
+predicted_points <- predict(multi_model, newdata = testing_data, type = "class")
+predictions <- ifelse(predicted_probs > 0.5, 1, 0)
+
+
+testing_data$PredictedOutcome <- predictions
+accuracy <- mean(testing_data$PredictedOutcome == testing_data$Points2)
+print(paste("Accuracy:", accuracy))
+
+conf_mat <- table(Predicted = predicted_points, Actual = testing_data$Points)
+
+
+print(conf_mat)
+accuracy <- sum(diag(conf_mat)) / sum(conf_mat)
+print(paste("Predictive Accuracy:", accuracy))
+```
+
+## Full models
+
+```{r}
+multi_model <- multinom(Points ~ TeamElo + OpponentElo + RecentPerc, data = clean_scores_long4)
+
+predicted_probs <- predict(multi_model, newdata = long_predict_data, type = "probs")
+win_probabilities <- predicted_probs[,3]
+
+tot_multi <- cbind(long_predict_data, predicted_probs)
+
+```
+
+```{r}
+lr_model <- glm(Points2 ~ TeamElo + OpponentElo, 
+                      family = binomial(link = "logit"), 
+                      data = clean_scores_long4)
+
+predicted_probs <- predict(lr_model, newdata = long_predict_data, type = "response")
+predicted_outcomes <- ifelse(predicted_probs > 0.5, 1, 0)
+
+tot_multi$PredictedProbability <- predicted_probs
+tot_multi$PredictedOutcome <- predicted_outcomes
+
+# tot_multi <- cbind(long_predict_data, predicted_probs)
+```
+
+
+
+1. Best and worst teams in the 2nd half of the 2023-24 season:
+
+```{r}
+# long_predict_data$WinProbability <- predicted_probs[,3]  
+team_performance <- tot_multi %>%
+  select(TeamFullName, PredictedProbability) %>%
+  group_by(TeamFullName) %>%
+  summarise(AverageWinProbability = mean(PredictedProbability, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+ranked_teams <- team_performance %>%
+  arrange(desc(AverageWinProbability))
+```
+
+
+1. My top 5 teams, based on their average win probability for the rest of the 2023-24 season, are Edmonton, Winnipeg, Vancouver, Boston, then Colorado. My bottom 5 are San Jose, Chicago, Columbus, Anaheim, Montreal.
+
+```{r}
+tot_multi %>%
+  filter(Date == '2024-01-22
+', 
+TeamFullName == 'Florida') %>%
+  dplyr::select(PredictedProbability)
+```
+
+
+2. I have the probability of Florida winning on 1/21/24 as 55.34%.
+
+```{r}
+boston_win_probabilities <- tot_multi %>%
+  filter(TeamFullName == "Boston") %>%
+  summarize(AverageWinProbability = mean(PredictedProbability))
+
+league_average_win_probability <- tot_multi %>%
+  summarize(LeagueAverageWinProbability = mean(PredictedProbability))
+
+print(boston_win_probabilities$AverageWinProbability - league_average_win_probability$LeagueAverageWinProbability)
+```
+
+3. I have Boston as 10.38% better than the league average in terms of average win probability for the rest of the 2023-24 season.
+
+
+
+
+
+

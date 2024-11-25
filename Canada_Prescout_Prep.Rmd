@@ -1,0 +1,283 @@
+---
+title: "Canada Prescout"
+author: "Claire Dudley"
+date: "2024-11-23"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+```
+
+```{r, include=FALSE}
+olympic_data <- read_csv('olympic_womens_dataset.csv')
+
+# Filter out collegiate games
+olympic_data_only <-
+  olympic_data %>%
+  filter(str_detect(`Home Team`, "Olympic")) %>%
+  mutate(NextTeam = dplyr::lead(Team), NextEvent = dplyr::lead(Event))
+
+canada_data <-
+  olympic_data_only %>%
+  filter(`Home Team` == "Olympic (Women) - Canada" | `Away Team` == "Olympic (Women) - Canada") %>%
+  mutate(is_Canada = ifelse(Team == "Olympic (Women) - Canada", "Canada", "Opponent"))
+```
+
+```{r}
+# Calculating Slot Shots and Slot Passes
+# slot bounds and indicator variables
+xmin <- 154
+xmax <- 184
+ymin <- 35.5
+ymax <- 49.5
+
+canada_data <-
+  canada_data %>%
+  mutate(IsSlotShot = ifelse(
+    `X Coordinate` >= xmin & `X Coordinate` <= xmax &
+      `Y Coordinate` >= ymin & `Y Coordinate` <= ymax, 
+    1,
+    0
+  ),
+  IsSlotPass = ifelse(
+    `X Coordinate 2` >= xmin & `X Coordinate` <= xmax &
+      `Y Coordinate 2` >= ymin & `Y Coordinate` <= ymax, 
+    1,
+    0
+  )
+  )
+
+
+```
+
+## 5 on 5 Average Values
+```{r}
+# comparison <-
+canada_data %>%
+  filter(`Home Team Skaters` == 5 & `Away Team Skaters` == 5) %>%
+  group_by(is_Canada) %>%
+  summarise(
+    AvgGoals = mean(sum(Event == "Goal")) / 10,
+    AvgShots = mean(sum(Event == "Shot")) / 10,
+    AvgShotsonNet = mean(sum(Event == "Shot" & `Detail 2` == "On Net")) / 10,
+    PercentShotsOnNet = AvgShotsonNet / AvgShots,
+    PercentSlotShots = (mean(sum(IsSlotShot)) / 10) / AvgShots,
+    AvgSlotPasses = mean(sum(IsSlotPass, na.rm = TRUE)) / 10,
+    AvgPenaltiesTaken = mean(sum(Event == "Penalty Taken")) / 10,
+    AvgPuckRecoveries = mean(sum(Event == "Puck Recovery")) / 10,
+    AvgTakeaways = mean(sum(Event == "Takeaway")) / 10,
+    FaceoffWins = mean(sum(Event == "Faceoff Win")) / 10,
+    ZoneEntries = mean(sum(Event == "Zone Entry")) / 10,
+    PassingRate = mean(sum(Event == "Play") / (sum(Event == "Play") + sum(Event == "Incomplete Play")))
+  ) %>%
+  pivot_longer(-is_Canada, names_to = "Metric", values_to = "Value") %>%
+  pivot_wider(names_from = is_Canada, values_from = Value) %>%
+  kable()
+```
+
+  Canada tends to outscore and out-shoot their opponents on average. They generate a higher percentage of their shots from the slot than their opponents and complete more passes to the slot as well. They do have a lower percentage of shots on net.
+  
+  Canada takes fewer penalties per game than their opponents do on average. They draw an average of 4 penalties a game.
+  
+  Team Canada is efficient defensively on both puck recoveries and takeaways. Their opponents tend to have a lower pass success rate that Canada is able to take advantage of. They are strong on faceoffs, on average winning 22 and losing 17. We can see from their average zone entries being 59.7 relative to their opponent's 47.5 that they tend to control possession for more of the game. 
+
+
+
+## Where does Canada Generate Offense?
+```{r}
+canada_shooting_plays <- 
+  canada_data %>%
+  filter((lead(Team) == "Olympic (Women) - Canada") & 
+           (lead(Event) %in% c("Shot", "Goal")))
+
+canada_data <-
+  canada_data %>%
+  mutate(NextTeam = dplyr::lead(Team), NextEvent = dplyr::lead(Event))
+
+canada_shooting_plays <-
+  canada_data %>%
+  filter(NextTeam == "Olympic (Women) - Canada" & NextEvent %in% c("Shot", "Goal"))
+
+canada_shooting_plays %>%
+  group_by(Event) %>%
+  summarise(Count = n()) %>%
+  mutate(Percent = ((Count / sum(Count)) * 100)) %>%
+  arrange(desc(Percent)) %>%
+  kable()
+```
+
+## Versus their opponents:
+```{r}
+other_shooting_plays <-
+  olympic_data_only %>%
+  mutate(NextTeam = dplyr::lead(Team), NextEvent = dplyr::lead(Event))
+
+other_shooting_plays <-
+  other_shooting_plays %>%
+  filter(NextTeam != "Olympic (Women) - Canada" & NextEvent %in% c("Shot", "Goal"))
+
+
+other_shooting_plays %>%
+  group_by(Event) %>%
+  summarise(Count = n()) %>%
+  mutate(Percent = ((Count / sum(Count)) * 100)) %>%
+  arrange(desc(Count)) %>% 
+  kable()
+
+
+```
+
+When looking at the events directly preceding a shot or goal, Canada does a good job creating offense directly off a puck recovery. This shows how quickly they are able to convert on a change of possession. They also generate more shots directly following a takeaway compared to their opponent on average.
+
+It is also worth noting they generate fewer shots and goals directly from a zone entry compared to their opponents. This also means defensively they give up more shots directly after a zone entry; however, it is worth noting that this does not include zone entries where there is a pass and then a shot.
+
+Canada has a slightly higher rebound rate than their opponents as well. It is important to be aware of this when defending their forwards in front of the net so we can try to limit their rebound opportunities by tying them up.
+
+
+
+
+# Powerplay and Penalty Kill
+
+```{r}
+canada_data <- 
+  canada_data %>%
+  mutate(
+    PPGF_home = ifelse((Event == "Goal" & `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters` ), TRUE, FALSE) ,
+    PPGF_away = ifelse((Event == "Goal" & `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters` ), TRUE, FALSE),
+    PPshots_home = ifelse((Event == "Shot" & `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters` ), TRUE, FALSE),
+    PPshots_away =  ifelse((Event == "Shot" & `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters` ), TRUE, FALSE),
+    penalties_home = ifelse(Event == "Penalty Taken" & `Home Team` == Team, TRUE, FALSE),
+    penalties_away = ifelse(Event == "Penalty Taken" & `Away Team` == Team, TRUE, FALSE),
+    PP_recoveries_home = ifelse(`X Coordinate` < 50 & Event == "Puck Recovery" &  `Home Team` == Team & `Home Team Skaters` > `Away Team Skaters`, TRUE, FALSE),
+    PP_recoveries_away = ifelse(`X Coordinate` < 50 & Event == "Puck Recovery" &  `Away Team` == Team & `Away Team Skaters` > `Home Team Skaters`, TRUE, FALSE)
+  )
+
+game_data <- 
+  canada_data %>%
+  group_by(game_date, `Home Team`, `Away Team`) %>%
+  summarise(
+    HomeGoals = sum(Event == "Goal" & `Home Team` == Team),
+    AwayGoals = sum(Event == "Goal" & `Away Team` == Team),
+    HomePP_goals = sum(PPGF_home),
+    AwayPP_goals = sum(PPGF_away),
+    HomePP_shots = sum(PPshots_home),
+    AwayPP_shots = sum(PPshots_away),
+    Home_penalties = sum(penalties_home),
+    Away_penalties = sum(penalties_away),
+    Home_recoveries = sum(PP_recoveries_home),
+    Away_recoveries = sum(PP_recoveries_away),
+    .groups = "drop")
+
+game_data <- game_data %>%
+  mutate(
+    Home_opposing_penalties = Away_penalties,
+    Away_opposing_penalties = Home_penalties
+  )
+
+# longer
+long_data <- game_data %>%
+  pivot_longer(
+    cols = c(HomeGoals, AwayGoals, HomePP_goals, AwayPP_goals, HomePP_shots, AwayPP_shots,
+             Home_recoveries, Away_recoveries,
+             Home_opposing_penalties, Away_opposing_penalties),
+    names_to = c("Type", ".value"),
+    names_pattern = "(Home|Away)(.*)"
+  ) %>% ungroup()
+
+long_data <- long_data %>%
+  mutate(
+    Team = ifelse(Type == "Home", `Home Team`, `Away Team`),
+    Opposing_penalties = ifelse(Type == "Home", Away_penalties, Home_penalties)  # Map opposing penalties explicitly
+  ) %>%
+  select(game_date, Team, Goals, PP_goals, Opposing_penalties, PP_shots, `_recoveries`) %>%
+  mutate(Canada = ifelse(Team == "Olympic (Women) - Canada", "Canada", "Opponent"))
+
+
+# Calculate power play success percentage
+pp_data <- long_data %>%
+  mutate(
+    PP_success_percentage = ifelse(Opposing_penalties > 0, (PP_goals / Opposing_penalties) * 100, 0)
+  )
+
+pp_data2 <-
+  pp_data %>%
+  group_by(Canada) %>%
+  summarise(
+    Goals = sum(Goals),
+    PP_goals = sum(PP_goals),
+    Opportunities = sum(Opposing_penalties),
+    PP_shots = sum(PP_shots),
+    recoveries = sum(`_recoveries`)
+    
+    
+  )
+
+# pp_data2 <-
+  pp_data2 %>%
+  mutate(Success_Rate = round(PP_goals / Opportunities, 2),
+         Shots_per_opportunity = round(PP_shots / Opportunities, 2),
+         Recoveries_per_opportunity = round(recoveries / Opportunities, 2)) %>%
+  arrange(desc(Success_Rate)) %>% 
+    dplyr::select(-Goals, -PP_shots, -recoveries) %>%
+    kable()
+```
+
+# Top Players
+
+```{r}
+can_player_data <- canada_data %>%
+  filter(is_Canada == "Canada") %>%
+  group_by(Player) %>%
+  summarize(
+    Total_Shots = sum(Event == "Shot", na.rm = TRUE),
+    Goals = sum(Event == "Goal", na.rm = TRUE),
+    Assists = sum(Player == "Player 2" & Event %in% c("Goal", "Play"), na.rm = TRUE), # Count assists
+    Total_Points = Goals + Assists,
+    Passes = sum(Event == "Play", na.rm = TRUE),
+    Incomplete_Passes = sum(Event == "Incomplete Play", na.rm = TRUE),
+    Takeaways = sum(Event == "Takeaway", na.rm = TRUE),
+    Puck_Recoveries = sum(Event == "Puck Recovery", na.rm = TRUE),
+    Dump_Ins = sum(Event == "Zone Entry" & `Detail 1` == "Dumped"),
+    Dump_Outs = sum(Event == "Dump Out", na.rm = TRUE),
+    Zone_Entries = sum(Event == "Zone Entry" & `Detail 1` == "Carried"),
+    Faceoff_Wins = sum(Event == "Faceoff Win", na.rm = TRUE),
+    Penalties_Taken = sum(Event == "Penalty Taken", na.rm = TRUE),
+    Shot_Traffic = sum(Event == "Shot" & "Detail 3" == "true", na.rm = TRUE),
+    Shot_OneTimers = sum(Event == "Shot" & "Detail 4" == "true", na.rm = TRUE),
+  ) %>%
+  ungroup()
+
+can_player_data %>%
+  mutate(
+    Shooting_Accuracy = Goals /Total_Shots,
+    Passing_Accuracy = Passes / (Passes + Incomplete_Passes)
+  ) %>%
+    dplyr::select(Player, Goals, Passes, Puck_Recoveries, Zone_Entries) %>%
+  arrange(desc(Goals), desc(Passes), desc(Puck_Recoveries), desc(Zone_Entries)) %>%
+    head(10) %>% kable()
+
+```
+
+# Goaltending
+
+```{r}
+canada_data %>%
+  filter(Team != "Olympic (Women) - Canada" & Event %in% c("Shot", "Goal")) %>%
+  summarise(
+    ShotsAgainst = sum(Event == "Shot" & `Detail 2` == "On Net") + sum(Event == "Goal"),
+    SavePercentage = sum(Event == "Shot" & `Detail 2` == "On Net") / ShotsAgainst
+  ) %>% kable()
+```
+
+
+
+
+
+

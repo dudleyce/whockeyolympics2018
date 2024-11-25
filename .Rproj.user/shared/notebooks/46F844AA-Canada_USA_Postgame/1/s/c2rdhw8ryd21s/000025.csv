@@ -1,0 +1,5 @@
+"0",""
+"0","# U.S."
+"0","us_offense <-"
+"0","  postgame_data %>%"
+"0","  filter(NextTeam == ""Olympic (Women) - United States"" & NextEvent %in% c(""Shot"", ""Goal""))"
